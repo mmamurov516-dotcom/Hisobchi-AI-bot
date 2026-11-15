@@ -55,6 +55,41 @@ JSON javob formati:
 }
 """
 
+SYSTEM_AUDIO_PROMPT = """
+Siz — O'zbekistondagi eng tajribali va tezkor shaxsiy hisobchi sun'iy intellektisiz.
+Vazifangiz: Foydalanuvchining yuborgan OVOZLI XABARINI (audio) tinglab, undagi o'zbekcha nutqni aniq tushunish, aytilgan daromad yoki xarajatlarni, summalarni va ma'lumotlarni toza JSON formatida qaytarish.
+
+Qoidalar:
+1. Nutqni aniq matnga o'giring (transcription).
+2. Summalarni hisoblash:
+   - "ming" / "k" = 1 000 ga ko'paytiring (masalan: 10 ming = 10000, 20 ming = 20000, 50k = 50000).
+   - "mln" / "million" = 1 000 000 ga ko'paytiring (masalan: 5 million = 5000000, 4.5 mln = 4500000).
+3. Harakat turlari (intent):
+   - "add_transaction": xarajat yoki daromad aytilgan bo'lsa.
+   - "query_balance": qancha pul qolgani ("qancha pulim qoldi", "balansim qancha") so'ralsa.
+   - "query_expenses": aynan nimaga qancha ketgani ("harajatlarim", "nimaga qancha sarflandi") so'ralsa.
+   - "delete_last": oxirgisini bekor qilish/o'chirish aytilsa.
+   - "clear_all": hammasini tozalash aytilsa.
+   - "general_chat": oddiy suhbat yoki moliyaviy maslahat so'ralsa.
+4. Kategoriya nomlari:
+   - Oziq-ovqat, Transport, Kommunal & Aloqa, Kiyim-kechak, Salomatlik, Uy-ro'zg'or, Ko'ngilochar, Ta'lim, Daromad, Boshqa.
+
+JSON formati:
+{
+  "transcription": "Foydalanuvchi audioda aytgan aniq matn (o'zbek tilida)",
+  "intent": "add_transaction" | "query_balance" | "query_expenses" | "delete_last" | "clear_all" | "general_chat",
+  "items": [
+    {
+      "type": "expense" | "income",
+      "description": "Narsa yoki xizmat nomi (masalan: 1 kg olma)",
+      "amount": 10000,
+      "category": "Oziq-ovqat"
+    }
+  ],
+  "ai_reply": "Foydalanuvchiga xushmuomala javob"
+}
+"""
+
 async def analyze_message_with_ai(user_text: str, context_summary: dict = None) -> dict:
     context_str = ""
     if context_summary:
@@ -93,4 +128,42 @@ async def analyze_message_with_ai(user_text: str, context_summary: dict = None) 
             "intent": "general_chat",
             "items": [],
             "ai_reply": "Kechirasiz, xabaringizni tahlil qilishda nosozlik yuz berdi. Iltimos yana bir bor urinib ko'ring."
+        }
+
+async def analyze_audio_with_ai(audio_bytes: bytes, mime_type: str = "audio/ogg", context_summary: dict = None) -> dict:
+    context_str = ""
+    if context_summary:
+        context_str = (
+            f"\n[Foydalanuvchining hozirgi hisobi: "
+            f"Jami daromad: {context_summary.get('total_income', 0)} so'm, "
+            f"Jami sarflangan: {context_summary.get('total_expense', 0)} so'm, "
+            f"Qolgan balans: {context_summary.get('balance', 0)} so'm]"
+        )
+
+    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+    instruction_part = types.Part.from_text(text=f"{SYSTEM_AUDIO_PROMPT}\n{context_str}\nAudioni tahlil qiling va faqat JSON qaytaring.")
+
+    try:
+        response = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[audio_part, instruction_part]
+                )
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1
+            )
+        )
+        parsed = json.loads(response.text)
+        return parsed
+    except Exception as e:
+        logger.error(f"Gemini audio tahlilda xatolik: {e}")
+        return {
+            "transcription": "",
+            "intent": "general_chat",
+            "items": [],
+            "ai_reply": "Kechirasiz, ovozli xabarni tushunishda xatolik yuz berdi. Iltimos ovozingizni aniqroq qilib qayta yuborib ko'ring yoki matn shaklida yozing."
         }
