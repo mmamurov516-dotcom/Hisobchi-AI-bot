@@ -126,7 +126,22 @@ async def cmd_clear(message: Message):
 async def handle_user_text(message: Message):
     user_id = message.from_user.id
     user_text = message.text.strip()
+    user_lower = user_text.lower()
     
+    # Tezkor javob (Fast-path): Oddiy so'zlarni AI kutmasdan 0.01 soniyada chiqarish
+    if user_lower in ["balans", "balansim", "hisob", "hisobim"]:
+        await cmd_balance(message)
+        return
+    if user_lower in ["xarajatlar", "harajatlar", "xarajatlarim", "harajatlarim"]:
+        await cmd_expenses(message)
+        return
+    if user_lower in ["bekor", "bekor qilish", "undo"]:
+        await cmd_undo(message)
+        return
+
+    # Foydalanuvchiga bot o'ylayotganini ko'rsatish ("yozmoqda...")
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+
     await register_user(
         user_id=user_id,
         full_name=message.from_user.full_name,
